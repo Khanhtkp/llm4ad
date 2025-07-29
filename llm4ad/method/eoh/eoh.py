@@ -175,27 +175,34 @@ class EoH:
         sample_start = time.time()
         thought, func = self._sampler.get_thought_and_function(prompt)
         sample_time = time.time() - sample_start
+
+        # ✅ Always increment sample count (even if failed)
+        self._tot_sample_nums += 1
+
         if thought is None or func is None:
             return
+
         # convert to Program instance
         program = TextFunctionProgramConverter.function_to_program(func, self._template_program)
         if program is None:
             return
+
         # evaluate
         score, eval_time = self._evaluation_executor.submit(
             self._evaluator.evaluate_program_record_time,
             program
         ).result()
+
         # register to profiler
         func.score = score
         func.evaluate_time = eval_time
         func.algorithm = thought
         func.sample_time = sample_time
+
         if self._profiler is not None:
-            self._profiler.register_function(func, program=str(program))
+            self._profiler.register_function(func)
             if isinstance(self._profiler, EoHProfiler):
                 self._profiler.register_population(self._population)
-            self._tot_sample_nums += 1
 
         # register to the population
         self._population.register_function(func)
@@ -277,9 +284,8 @@ class EoH:
                 self._sample_evaluate_register(prompt)
                 if self._tot_sample_nums >= self._initial_sample_nums_max:
                     # print(f'Warning: Initialization not accomplished in {self._initial_sample_nums_max} samples !!!')
-                    print(
-                        f'Note: During initialization, EoH gets {len(self._population) + len(self._population._next_gen_pop)} algorithms '
-                        f'after {self._initial_sample_nums_max} trails.')
+                    print(f'Note: During initialization, EoH gets {len(self._population) + len(self._population._next_gen_pop)} algorithms '
+                          f'after {self._initial_sample_nums_max} trails.')
                     break
             except Exception:
                 if self._debug_mode:
@@ -308,17 +314,12 @@ class EoH:
             self._population.survival()
             # terminate searching if
             if len(self._population) < self._selection_num:
-                print(
-                    f'The search is terminated since EoH unable to obtain {self._selection_num} feasible algorithms during initialization. '
-                    f'Please increase the `initial_sample_nums_max` argument (currently {self._initial_sample_nums_max}). '
-                    f'Please also check your evaluation implementation and LLM implementation.')
+                print(f'The search is terminated since EoH unable to obtain {self._selection_num} feasible algorithms during initialization. '
+                      f'Please increase the `initial_sample_nums_max` argument (currently {self._initial_sample_nums_max}). '
+                      f'Please also check your evaluation implementation and LLM implementation.')
                 return
-
         # evolutionary search
         self._multi_threaded_sampling(self._iteratively_use_eoh_operator)
-
         # finish
         if self._profiler is not None:
             self._profiler.finish()
-
-        self._sampler.llm.close()

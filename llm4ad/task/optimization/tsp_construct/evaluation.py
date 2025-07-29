@@ -32,7 +32,7 @@
 # http://www.llm4ad.com/contact.html
 # --------------------------------------------------------------------------
 from __future__ import annotations
-
+import time
 from typing import Any
 import numpy as np
 from llm4ad.base import Evaluation
@@ -47,7 +47,7 @@ class TSPEvaluation(Evaluation):
 
     def __init__(self,
                  timeout_seconds=30,
-                 n_instance=16,
+                 n_instance=64,
                  problem_size=50,
                  **kwargs):
 
@@ -94,10 +94,10 @@ class TSPEvaluation(Evaluation):
         return neighborhood_matrix
 
     def evaluate(self, eva: callable) -> float:
-
         n_max = self.n_instance
         dis = np.ones(self.n_instance)
         n_ins = 0
+        total_eval_time = 0
 
         for instance, distance_matrix in self._datasets:
 
@@ -107,7 +107,7 @@ class TSPEvaluation(Evaluation):
             destination_node = 0
 
             current_node = 0
-
+            start = time.time()
             route = np.zeros(self.problem_size)
             # print(">>> Step 0 : select node "+str(instance[0][0])+", "+str(instance[0][1]))
             for i in range(1, self.problem_size - 1):
@@ -136,10 +136,11 @@ class TSPEvaluation(Evaluation):
 
             route[self.problem_size - 1] = current_node
 
+            total_eval_time += time.time() - start
+
             LLM_dis = self.tour_cost(instance, route, self.problem_size)
 
             dis[n_ins] = LLM_dis
-
             n_ins += 1
             if n_ins == self.n_instance:
                 break
@@ -147,7 +148,7 @@ class TSPEvaluation(Evaluation):
 
         ave_dis = np.average(dis)
         # print("average dis: ",ave_dis)
-        return -ave_dis
+        return -ave_dis, (total_eval_time)/n_ins
 
 
 if __name__ == '__main__':

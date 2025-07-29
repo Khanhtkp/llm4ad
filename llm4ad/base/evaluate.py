@@ -42,13 +42,12 @@ class Evaluation(ABC):
             *,
             exec_code: bool = True,
             safe_evaluate: bool = True,
-            daemon_eval_process: bool = False,
-            fork_proc: Literal['auto'] | bool = 'auto'
+            daemon_eval_process: bool = False
     ):
         """Evaluation interface for executing generated code.
         Args:
             use_numba_accelerate: Wrap the function with '@numba.jit(nopython=True)'.
-            use_protected_div   : Modify 'a / b' => 'a / (b + delta)'. Maybe useful for mathematical tasks.
+            use_protected_div   : Modify 'a / b' => 'a / (b + delta)'.
             protected_div_delta : Delta value in protected div.
             random_seed         : If is not None, set random seed in the first line of the function body.
             timeout_seconds     : Terminate the evaluation after timeout seconds.
@@ -61,8 +60,6 @@ class Evaluation(ABC):
             daemon_eval_process : Set the evaluate process as a daemon process. If set to True,
                 you can not set new processes in the evaluator. Which means in self.evaluate_program(),
                 you can not create new processes.
-            fork_proc           : This arg is valid when safe_evaluate=True, which determines to 'fork' process or 'spawn' a safe process.
-                If set to 'auto', the process creating method will depend on OS. Set to 'True' to use 'fork', 'False' to use 'spawn'.
 
         -Assume that: use_numba_accelerate=True, self.use_protected_div=True, and self.random_seed=2024.
         -The original function:
@@ -73,7 +70,7 @@ class Evaluation(ABC):
             a = np.random.random()
             return a / b
         --------------------------------------------------------------------------------
-        -In the Evaluation phase, the modified function will be:
+        -The modified function will be:
         --------------------------------------------------------------------------------
         import numpy as np
         import numba
@@ -99,7 +96,6 @@ class Evaluation(ABC):
         self.exec_code = exec_code
         self.safe_evaluate = safe_evaluate
         self.daemon_eval_process = daemon_eval_process
-        self.fork_proc = fork_proc
 
     @abstractmethod
     def evaluate_program(self, program_str: str, callable_func: callable, **kwargs) -> Any | None:
@@ -136,10 +132,12 @@ class SecureEvaluator:
     def __init__(self,
                  evaluator: Evaluation,
                  debug_mode=False,
+                 *,
+                 fork_proc: Literal['auto', 'default'] | bool = False,
                  **kwargs):
+        assert fork_proc in [True, False, 'auto', 'default']
         self._evaluator = evaluator
         self._debug_mode = debug_mode
-        fork_proc = self._evaluator.fork_proc
 
         if self._evaluator.safe_evaluate:
             if fork_proc == 'auto':
@@ -176,6 +174,7 @@ class SecureEvaluator:
             program_str = self._modify_program_code(program_str)
             if self._debug_mode:
                 print(f'DEBUG: evaluated program:\n{program_str}\n')
+                print(function_name)
 
             # safe evaluate
             if self._evaluator.safe_evaluate:
@@ -187,11 +186,10 @@ class SecureEvaluator:
                     daemon=self._evaluator.daemon_eval_process
                 )
                 process.start()
-
                 if self._evaluator.timeout_seconds is not None:
                     try:
                         # get the result in timeout seconds
-                        result = result_queue.get(timeout=self._evaluator.timeout_seconds)
+                        result, runtime = result_queue.get(timeout=self._evaluator.timeout_seconds)
                         # after getting the result, terminate/kill the process
                         process.terminate()
                         process.join(timeout=5)
@@ -208,14 +206,15 @@ class SecureEvaluator:
                             process.kill()
                             process.join()
                         result = None
+                        runtime = None
                 else:
-                    result = result_queue.get()
+                    result, runtime = result_queue.get()
                     process.terminate()
                     process.join(timeout=5)
                     if process.is_alive():
                         process.kill()
                         process.join()
-                return result
+                return result, runtime
             else:
                 return self._evaluate(program_str, function_name, **kwargs)
         except Exception as e:
@@ -224,9 +223,8 @@ class SecureEvaluator:
             return None
 
     def evaluate_program_record_time(self, program: str | Program, **kwargs):
-        evaluate_start = time.time()
-        result = self.evaluate_program(program, **kwargs)
-        return result, time.time() - evaluate_start
+        result, runtime = self.evaluate_program(program, **kwargs)
+        return result, runtime
 
     def _evaluate_in_safe_process(self, program_str: str, function_name, result_queue: multiprocessing.Queue, **kwargs):
         try:
@@ -241,12 +239,12 @@ class SecureEvaluator:
                 program_callable = None
 
             # get evaluate result
-            res = self._evaluator.evaluate_program(program_str, program_callable, **kwargs)
-            result_queue.put(res)
+            res, runtime = self._evaluator.evaluate_program(program_str, program_callable, **kwargs)
+            result_queue.put((res, runtime))
         except Exception as e:
             if self._debug_mode:
                 print(e)
-            result_queue.put(None)
+            result_queue.put((None, 0.0))
 
     def _evaluate(self, program_str: str, function_name, **kwargs):
         try:
