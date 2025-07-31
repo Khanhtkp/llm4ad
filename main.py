@@ -1,6 +1,6 @@
-from llm4ad.task.optimization.tsp_construct import TSPEvaluation
+from llm4ad.task.optimization.mo_tsp_construct import MOTSPEvaluation
 from llm4ad.tools.llm.llm_api_gemini import GeminiApi
-from llm4ad.method.mcts import MCTS_AHD, MAProfiler
+from llm4ad.method.momcts import MOMCTS_AHD, MAProfiler
 
 if __name__ == '__main__':
     llm = GeminiApi(
@@ -8,10 +8,10 @@ if __name__ == '__main__':
         model='gemini-2.5-flash',
         timeout=60
     )
-    task = TSPEvaluation()
-    method = MCTS_AHD(
+    task = MOTSPEvaluation()
+    method = MOMCTS_AHD(
         llm=llm,
-        profiler=MAProfiler(log_dir='logs/mcts', log_style='complex'),
+        profiler=MAProfiler(log_dir='logs/momcts', log_style='complex'),
         evaluation=task,
         max_sample_nums=20,
         max_generations=10,
